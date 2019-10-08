@@ -7,14 +7,65 @@ import (
 	"strings"
 )
 
+func quotedstring(rs io.RuneScanner) (int, string, error) {
+	var qtype rune
+	var nrunes int
+	var closed bool
 
-// eatwhitespace returns the number of bytes it consume and any errors it
+	start := func() bool {
+		return nrunes == 1
+	}
+
+	qstring := func(r rune) bool {
+		nrunes++
+		// if we've closed the string, return false
+		if closed {
+			return false
+		}
+
+		// if we're reading the first rune, check to see if it is a quote
+		// character.
+		if start() {
+			switch r {
+			case '\'', '"':
+				qtype = r
+				return true
+			default:
+				return false
+			}
+		}
+
+		// if we've read a closing quote, close the string
+		if r == qtype {
+			closed = true
+		}
+
+		return true
+	}
+
+	return match(rs, qstring)
+}
+
+func atom(rs io.RuneScanner) (int, string, error) {
+	atom := func(r rune) bool {
+		return !unicode.IsSpace(r)
+	}
+	return match(rs, atom)
+}
+
+// whitespace returns the number of bytes it consume and any errors it
 // encounters along the way.
 //
-func eatwhitespace(rs io.RuneScanner) (int, error) {
+func whitespace(rs io.RuneScanner) (int, string, error) {
+	return match(rs, unicode.IsSpace)
+}
+
+func match(rs io.RuneScanner, matchfunc func(rune) bool) (int, string, error) {
 	if rs == nil {
-		return 0, fmt.Errorf("nil scanner")
+		return 0, "", fmt.Errorf("nil scanner")
 	}
+
+	sb := strings.Builder{}
 
 	var sum int
 	for {
@@ -22,12 +73,12 @@ func eatwhitespace(rs io.RuneScanner) (int, error) {
 
 		// if an error occured, return immediately.
 		if err != nil {
-			return sum, err
+			return sum, sb.String(), err
 		}
 
 		// if we didn't get an error, ensure that the rune we've read is is a
 		// whitespace.
-		if !unicode.IsSpace(r) {
+		if !matchfunc(r) {
 			// rune is not a space. put it back into the input stream and break out
 			// of loop.
 			rs.UnreadRune()
@@ -37,8 +88,9 @@ func eatwhitespace(rs io.RuneScanner) (int, error) {
 		// we've foun a white space characater at this point.  add it to our bytes
 		// read.
 		sum += nbytes
+		sb.WriteRune(r)
 	}
-	return sum, nil
+	return sum, sb.String(), nil
 }
 
 func (e *echo) expand(rs io.RuneScanner) ([]string, error) {
